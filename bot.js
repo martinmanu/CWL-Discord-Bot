@@ -308,15 +308,11 @@ client.on('interactionCreate', async interaction => {
                 const sorted = [...rankPlayers].sort((a, b) => b.score - a.score);
                 
                 let rankTable = '```\n';
-                rankTable += 'Rank| Name        | Tag      | Score | Heroes | Equipment | Pets\n';
-                rankTable += '----|-------------|----------|-------|--------|-----------|------\n';
+                rankTable += 'Rank | Name              | Tag        | Weight\n';
+                rankTable += '-----|-------------------|------------|-------\n';
                 
                 sorted.forEach((p, i) => {
-                    const heroTotal = p.heroes.king + p.heroes.queen + p.heroes.warden + p.heroes.champion + p.heroes.minion;
-                    const equipTotal = p.equipment.reduce((sum, level) => sum + level, 0);
-                    const petTotal = p.pets.reduce((sum, level) => sum + level, 0);
-                    
-                    rankTable += `${(i + 1).toString().padStart(4)} | ${p.name.substring(0, 17).padEnd(17)} | ${p.tag.padEnd(10)} | ${p.score.toString().padStart(5)} | ${heroTotal.toString().padStart(6)} | ${equipTotal.toString().padStart(9)} | ${petTotal.toString().padStart(4)}\n`;
+                    rankTable += `${(i + 1).toString().padStart(4)} | ${p.name.substring(0, 17).padEnd(17)} | ${p.tag.padEnd(10)} | ${p.score.toString().padStart(6)}\n`;
                 });
                 
                 rankTable += '```';
