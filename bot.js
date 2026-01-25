@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./keep-alive'); // Start keep-alive cron job
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const ExcelJS = require('exceljs');
@@ -39,9 +40,7 @@ async function fetchPlayerData(tag) {
     }
 
     try {
-        const response = await axios.get(`https://api.clashofclans.com/v1/players/%23${cleanTag}`, {
-            headers: { 'Authorization': `Bearer ${process.env.CLASH_API_KEY}` }
-        });
+        const response = await axios.get(`http://43.205.48.109:4000/${cleanTag}`);
 
         const player = response.data;
         const heroes = {
