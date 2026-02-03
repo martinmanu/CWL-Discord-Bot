@@ -3,6 +3,7 @@ require('./keep-alive'); // Start keep-alive cron job
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const ExcelJS = require('exceljs');
+const clans = require('./clans.json');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const sessions = new Map();
@@ -10,13 +11,14 @@ const playerCache = new Map();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 class Player {
-    constructor(tag, name, townHall, heroes, equipment, pets) {
+    constructor(tag, name, townHall, heroes, equipment, pets, clanName) {
         this.tag = tag;
         this.name = name;
         this.townHall = townHall;
         this.heroes = heroes;
         this.equipment = equipment;
         this.pets = pets;
+        this.clanName = clanName;
         this.score = this.calculateScore();
     }
 
@@ -68,7 +70,7 @@ async function fetchPlayerData(tag) {
             });
         }
 
-        const playerData = new Player(`#${cleanTag}`, player.name, player.townHallLevel, heroes, equipment, pets);
+        const playerData = new Player(`#${cleanTag}`, player.name, player.townHallLevel, heroes, equipment, pets, player.clan?.name || 'No Clan');
         
         playerCache.set(cacheKey, {
             data: playerData,
@@ -89,10 +91,18 @@ async function generateExcel(players, assignments = {}, filename = 'cwl_roster')
     const workbook = new ExcelJS.Workbook();
     const clanGroups = {};
     
+    // Group players by their assignments
     players.forEach(player => {
         const clan = assignments[player.tag] || 'Unassigned';
         if (!clanGroups[clan]) clanGroups[clan] = [];
         clanGroups[clan].push(player);
+    });
+
+    // Sort clan groups to match distribute order (non-bench clans first)
+    const sortedClanEntries = Object.entries(clanGroups).sort(([a], [b]) => {
+        if (a === 'Bench') return 1;
+        if (b === 'Bench') return -1;
+        return a.localeCompare(b);
     });
 
     const colors = [
@@ -107,7 +117,7 @@ async function generateExcel(players, assignments = {}, filename = 'cwl_roster')
     ];
 
     let colorIndex = 0;
-    Object.entries(clanGroups).forEach(([clanName, clanPlayers]) => {
+    sortedClanEntries.forEach(([clanName, clanPlayers]) => {
         const worksheet = workbook.addWorksheet(clanName);
         const colorScheme = colors[colorIndex % colors.length];
         
@@ -115,6 +125,7 @@ async function generateExcel(players, assignments = {}, filename = 'cwl_roster')
             { header: 'Player', key: 'name', width: 20 },
             { header: 'Tag', key: 'tag', width: 15 },
             { header: 'TH', key: 'th', width: 5 },
+            { header: 'Current Clan', key: 'currentClan', width: 20 },
             { header: 'Hero Total', key: 'heroTotal', width: 12 },
             { header: 'Equipment Total', key: 'equipmentTotal', width: 15 },
             { header: 'Pet Total', key: 'petTotal', width: 12 },
@@ -138,6 +149,7 @@ async function generateExcel(players, assignments = {}, filename = 'cwl_roster')
                 name: player.name,
                 tag: player.tag,
                 th: player.townHall,
+                currentClan: player.clanName,
                 heroTotal: heroTotal,
                 equipmentTotal: equipmentTotal,
                 petTotal: petTotal,
@@ -152,7 +164,7 @@ async function generateExcel(players, assignments = {}, filename = 'cwl_roster')
 
         const totalRow = worksheet.addRow({
             name: 'TOTAL CLAN WEIGHT',
-            tag: '', th: '', heroTotal: '', equipmentTotal: '', petTotal: '',
+            tag: '', th: '', currentClan: '', heroTotal: '', equipmentTotal: '', petTotal: '',
             score: clanTotalScore
         });
         
@@ -242,6 +254,44 @@ const commands = [
             option.setName('names')
                 .setDescription('Clan names separated by commas (optional)')
                 .setRequired(false)
+        ),
+    new SlashCommandBuilder()
+        .setName('showclans')
+        .setDescription('Show list of all clans'),
+    new SlashCommandBuilder()
+        .setName('editclan')
+        .setDescription('Edit clan level for a specific clan')
+        .addStringOption(option => {
+            const clanChoices = clans.slice(0, 25).map(clan => ({ name: clan.clan_name, value: clan.clan_name }));
+            return option.setName('name')
+                .setDescription('Clan name to edit')
+                .setRequired(true)
+                .addChoices(...clanChoices);
+        })
+        .addStringOption(option =>
+            option.setName('level')
+                .setDescription('New clan level')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Bronze 1', value: 'Bronze 1' },
+                    { name: 'Bronze 2', value: 'Bronze 2' },
+                    { name: 'Bronze 3', value: 'Bronze 3' },
+                    { name: 'Silver 1', value: 'Silver 1' },
+                    { name: 'Silver 2', value: 'Silver 2' },
+                    { name: 'Silver 3', value: 'Silver 3' },
+                    { name: 'Gold 1', value: 'Gold 1' },
+                    { name: 'Gold 2', value: 'Gold 2' },
+                    { name: 'Gold 3', value: 'Gold 3' },
+                    { name: 'Crystal 1', value: 'Crystal 1' },
+                    { name: 'Crystal 2', value: 'Crystal 2' },
+                    { name: 'Crystal 3', value: 'Crystal 3' },
+                    { name: 'Master 1', value: 'Master 1' },
+                    { name: 'Master 2', value: 'Master 2' },
+                    { name: 'Master 3', value: 'Master 3' },
+                    { name: 'Champion 1', value: 'Champion 1' },
+                    { name: 'Champion 2', value: 'Champion 2' },
+                    { name: 'Champion 3', value: 'Champion 3' }
+                )
         )
 ];
 
@@ -370,7 +420,7 @@ client.on('interactionCreate', async interaction => {
 
             case 'cwl':
                 const size = interaction.options.getInteger('size');
-                const clans = interaction.options.getInteger('clans');
+                const clanCount = interaction.options.getInteger('clans');
                 const clanNames = interaction.options.getString('names');
                 const cwlPlayers = sessions.get(guildId);
                 
@@ -384,14 +434,14 @@ client.on('interactionCreate', async interaction => {
                 const clanRosters = {};
                 
                 const cwlCustomNames = clanNames ? clanNames.split(',').map(name => name.trim()) : [];
-                for (let i = 0; i < clans; i++) {
+                for (let i = 0; i < clanCount; i++) {
                     const clanName = cwlCustomNames[i] || `Clan ${i + 1}`;
                     clanRosters[clanName] = [];
                 }
 
                 sortedCwl.forEach((player, index) => {
                     const clanIndex = Math.floor(index / size);
-                    if (clanIndex < clans) {
+                    if (clanIndex < clanCount) {
                         const clanName = cwlCustomNames[clanIndex] || `Clan ${clanIndex + 1}`;
                         clanRosters[clanName].push(player);
                         assignments[player.tag] = clanName;
@@ -415,7 +465,7 @@ client.on('interactionCreate', async interaction => {
                     }
                 });
 
-                const cwlBenchCount = sortedCwl.length - (size * clans);
+                const cwlBenchCount = sortedCwl.length - (size * clanCount);
                 if (cwlBenchCount > 0) {
                     cwlEmbed.addFields({
                         name: `Bench (${cwlBenchCount} players)`,
@@ -473,25 +523,31 @@ client.on('interactionCreate', async interaction => {
                 const customNames = names ? names.split(',').map(name => name.trim()) : [];
                 
                 sizes.forEach((size, i) => {
-                    const clanName = customNames[i] || `Clan ${i + 1} (${size}v${size})`;
+                    const clanName = customNames[i] || clans[i]?.clan_name || `Clan ${i + 1} (${size}v${size})`;
                     distClanRosters[clanName] = [];
                 });
 
                 if (sortMethod === 'equal') {
-                    sortedDist.forEach((player, index) => {
-                        const clanIndex = index % sizes.length;
-                        const clanName = customNames[clanIndex] || `Clan ${clanIndex + 1} (${sizes[clanIndex]}v${sizes[clanIndex]})`;
-                        if (distClanRosters[clanName].length < sizes[clanIndex]) {
-                            distClanRosters[clanName].push(player);
-                            distAssignments[player.tag] = clanName;
-                        } else {
-                            distAssignments[player.tag] = 'Bench';
+                    let playerIndex = 0;
+                    while (playerIndex < sortedDist.length) {
+                        for (let clanIndex = 0; clanIndex < sizes.length && playerIndex < sortedDist.length; clanIndex++) {
+                            const clanName = customNames[clanIndex] || clans[clanIndex]?.clan_name || `Clan ${clanIndex + 1} (${sizes[clanIndex]}v${sizes[clanIndex]})`;
+                            if (distClanRosters[clanName].length < sizes[clanIndex]) {
+                                distClanRosters[clanName].push(sortedDist[playerIndex]);
+                                distAssignments[sortedDist[playerIndex].tag] = clanName;
+                                playerIndex++;
+                            }
                         }
-                    });
+                    }
+                    
+                    while (playerIndex < sortedDist.length) {
+                        distAssignments[sortedDist[playerIndex].tag] = 'Bench';
+                        playerIndex++;
+                    }
                 } else {
                     let playerIndex = 0;
                     sizes.forEach((size, clanIndex) => {
-                        const clanName = customNames[clanIndex] || `Clan ${clanIndex + 1} (${size}v${size})`;
+                        const clanName = customNames[clanIndex] || clans[clanIndex]?.clan_name || `Clan ${clanIndex + 1} (${size}v${size})`;
                         for (let i = 0; i < size && playerIndex < sortedDist.length; i++) {
                             distClanRosters[clanName].push(sortedDist[playerIndex]);
                             distAssignments[sortedDist[playerIndex].tag] = clanName;
@@ -556,16 +612,53 @@ client.on('interactionCreate', async interaction => {
                 await interaction.deferReply();
 
                 const assignments_key = sessions.get(`${guildId}_assignments`) || {};
-                const sortedExport = [...exportPlayers].sort((a, b) => b.score - a.score);
                 const customFilename = interaction.options.getString('filename') || 'cwl_roster';
                 
-                const { buffer, filename } = await generateExcel(sortedExport, assignments_key, customFilename);
+                const { buffer, filename } = await generateExcel(exportPlayers, assignments_key, customFilename);
                 const attachment = new AttachmentBuilder(buffer, { name: `${filename}.xlsx` });
 
                 await interaction.editReply({ 
                     content: 'Here is your CWL roster export:',
                     files: [attachment] 
                 });
+                break;
+
+            case 'showclans':
+                let clanTable = '```\n';
+                clanTable += 'Name              | Level\n';
+                clanTable += '------------------|----------\n';
+                
+                clans.forEach(clan => {
+                    clanTable += `${clan.clan_name.substring(0, 17).padEnd(17)} | ${(clan.clan_level || 'N/A').substring(0, 9)}\n`;
+                });
+                
+                clanTable += '```';
+
+                const clanEmbed = new EmbedBuilder()
+                    .setTitle(`All Clans (${clans.length} total)`)
+                    .setDescription(clanTable)
+                    .setColor(0x0099FF);
+
+                await interaction.reply({ embeds: [clanEmbed] });
+                break;
+
+            case 'editclan':
+                const clanName = interaction.options.getString('name');
+                const newLevel = interaction.options.getString('level');
+                
+                const clanIndex = clans.findIndex(clan => clan.clan_name.toLowerCase() === clanName.toLowerCase());
+                
+                if (clanIndex === -1) {
+                    await interaction.reply(`Clan "${clanName}" not found.`);
+                    return;
+                }
+                
+                clans[clanIndex].clan_level = newLevel;
+                
+                const fs = require('fs');
+                fs.writeFileSync('./clans.json', JSON.stringify(clans, null, 2));
+                
+                await interaction.reply(`Updated "${clans[clanIndex].clan_name}" level to "${newLevel}"`);
                 break;
         }
     } catch (error) {
